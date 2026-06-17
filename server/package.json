@@ -1,0 +1,12 @@
+{
+  "name": "alert-system-server",
+  "version": "1.0.0",
+  "description": "Mock SSE server for the configurable alert system",
+  "main": "mock-sse-server.js",
+  "scripts": {
+    "start": "node mock-sse-server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

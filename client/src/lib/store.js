@@ -91,16 +91,16 @@ const sseClient = new SSEClient({
     const result = validateEvent(raw);
     if (!result.valid) {
       pushError(result.error);
+      notify();
       return;
     }
     const event = result.event;
 
-    // Prepend so newest is first
-    state.events = [event, ...state.events].slice(0, MAX_EVENTS);
-
-    // Evaluate rules
     const now     = new Date();
     const matched = getMatchingRules(state.rules, event, now);
+    event._matched = matched.length > 0;
+
+    state.events = [event, ...state.events].slice(0, MAX_EVENTS);
 
     matched.forEach((rule) => {
       const alert = buildAlert(rule, event, now);

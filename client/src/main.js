@@ -4,7 +4,7 @@
  */
 
 import {
-  connectSSE, disconnectSSE,
+  connectSSE, disconnectSSE, connectDemo,
   addRule, toggleRule, deleteRule,
   importRules, exportRules,
   acknowledgeAlert, clearAlerts,
@@ -59,8 +59,8 @@ main { display: grid; grid-template-columns: 340px 1fr; grid-template-rows: auto
 .right-col .panel:last-child { border-bottom: none; }
 
 /* ── SSE bar ── */
-.sse-bar { grid-column: 1/-1; display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.sse-url { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 10px; color: var(--text); font-size: 13px; }
+.sse-bar { grid-column: 1/-1; display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+.sse-url { flex: 1; min-width: 200px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 10px; color: var(--text); font-size: 13px; }
 .sse-url:focus { outline: none; border-color: var(--accent); }
 .state-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .state-dot.idle         { background: var(--muted); }
@@ -69,6 +69,7 @@ main { display: grid; grid-template-columns: 340px 1fr; grid-template-rows: auto
 .state-dot.error        { background: var(--red); animation: blink .7s infinite; }
 .state-dot.disconnected { background: var(--muted); }
 .state-label { font-size: 12px; color: var(--muted); }
+.mode-badge { font-size: 10px; padding: 2px 7px; border-radius: 20px; background: rgba(245,158,11,.15); color: var(--yellow); border: 1px solid rgba(245,158,11,.3); }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
 /* ── Buttons ── */
@@ -166,16 +167,18 @@ document.getElementById("app").innerHTML = `
 </header>
 
 <main>
-  <!-- SSE bar spans full width -->
   <div class="sse-bar" style="grid-column:1/-1">
     <div class="state-dot idle" id="state-dot"></div>
     <span class="state-label" id="state-label">Idle</span>
+    <span id="mode-badge-wrap"></span>
     <input class="sse-url" id="sse-url" type="text" value="http://localhost:4000/events" placeholder="SSE URL" />
     <button class="btn-primary btn-sm" id="btn-connect">Connect</button>
     <button class="btn-ghost btn-sm" id="btn-disconnect">Disconnect</button>
+    <button class="btn-ghost btn-sm" id="btn-demo" title="Simulates events in-browser — no real backend required">
+      <i class="fa fa-flask"></i> Try demo mode
+    </button>
   </div>
 
-  <!-- Left: rules + add form -->
   <div class="panel">
     <div class="panel-header">
       <i class="fa fa-sliders"></i> Rules
@@ -220,9 +223,7 @@ document.getElementById("app").innerHTML = `
     </div>
   </div>
 
-  <!-- Right col -->
   <div class="right-col">
-    <!-- Event feed -->
     <div class="panel">
       <div class="panel-header">
         <i class="fa fa-rss"></i> Event stream
@@ -231,7 +232,6 @@ document.getElementById("app").innerHTML = `
       <div class="panel-body" id="event-feed"></div>
     </div>
 
-    <!-- Alerts + errors tabs -->
     <div class="panel">
       <div class="panel-header" style="gap:0">
         <button class="btn-icon" id="tab-alerts" style="color:var(--text);padding:4px 10px"><i class="fa fa-bell"></i> Alerts <span id="alert-count-tab" style="margin-left:4px;background:var(--red);color:#fff;border-radius:10px;padding:0 6px;font-size:11px">0</span></button>
@@ -268,228 +268,4 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString();
 }
 
-// ─── Renderers ───────────────────────────────────────────────────────────────
-
-function renderSSEState({ sseState, sseUrl }) {
-  const dot   = document.getElementById("state-dot");
-  const label = document.getElementById("state-label");
-  const labels = {
-    [SSE_STATE.IDLE]:         "Idle",
-    [SSE_STATE.CONNECTING]:   "Connecting…",
-    [SSE_STATE.CONNECTED]:    "Connected",
-    [SSE_STATE.ERROR]:        "Error — retrying",
-    [SSE_STATE.DISCONNECTED]: "Disconnected",
-  };
-  dot.className   = `state-dot ${sseState}`;
-  label.textContent = labels[sseState] ?? sseState;
-  document.getElementById("sse-url").value = sseUrl;
-}
-
-function renderRules({ rules }) {
-  const list = document.getElementById("rule-list");
-  document.getElementById("rule-count").textContent = rules.length;
-
-  if (!rules.length) {
-    list.innerHTML = `<div class="empty">No rules yet — add one below</div>`;
-    return;
-  }
-
-  list.innerHTML = rules.map(r => {
-    const src = r.source || "<em>any source</em>";
-    return `
-    <div class="rule-item">
-      <label class="rule-toggle" title="${r.enabled ? "Disable" : "Enable"}">
-        <input type="checkbox" ${r.enabled ? "checked" : ""} data-rule-toggle="${r.id}" />
-        <span class="rule-track"></span>
-      </label>
-      <div class="rule-info">
-        <div class="rule-name">${r.name}</div>
-        <div class="rule-desc">${src} · ${r.metric} ${r.operator} ${r.threshold} · cooldown ${r.cooldownSeconds}s</div>
-      </div>
-      <span class="rule-badge ${r.enabled ? "on" : "off"}">${r.enabled ? "ON" : "OFF"}</span>
-      <button class="btn-icon btn-sm" data-rule-delete="${r.id}" title="Delete rule"><i class="fa fa-trash"></i></button>
-    </div>`;
-  }).join("");
-}
-
-function renderEvents({ events }) {
-  const feed = document.getElementById("event-feed");
-  document.getElementById("event-count").textContent = events.length;
-
-  if (!events.length) {
-    feed.innerHTML = `<div class="empty">Waiting for events…</div>`;
-    return;
-  }
-
-  feed.innerHTML = events.slice(0, 60).map(e => {
-    const matched = e._matched;
-    return `<div class="event-row ${matched ? "hit" : ""}">
-      <span class="event-src">${e.source}</span>
-      <span class="event-metric">${e.metric}</span>
-      <span class="event-val ${matched ? "hit" : ""}">${e.value}</span>
-      <span class="event-ts">${fmtTime(e.timestamp)}</span>
-    </div>`;
-  }).join("");
-}
-
-function renderAlerts({ alerts }) {
-  const log = document.getElementById("alert-log");
-  const unacked = alerts.filter(a => !a.acknowledged).length;
-  document.getElementById("alert-count-tab").textContent = unacked;
-
-  if (!alerts.length) {
-    log.innerHTML = `<div class="empty">No alerts fired yet</div>`;
-    return;
-  }
-
-  log.innerHTML = alerts.map(a => `
-    <div class="alert-item ${a.acknowledged ? "acked" : ""}">
-      <div class="alert-top">
-        <div class="alert-dot ${a.acknowledged ? "acked" : ""}"></div>
-        <div class="alert-rule">${a.ruleName}</div>
-        <span class="alert-time">${fmtTime(a.triggeredAt)}</span>
-        ${!a.acknowledged ? `<button class="btn-ghost btn-sm" data-ack="${a.id}">Ack</button>` : ""}
-      </div>
-      <div class="alert-detail">
-        ${a.source} · ${a.metric} = <strong>${a.value}</strong> (${a.operator} ${a.threshold}) · event @ ${fmtTime(a.eventTimestamp)}
-      </div>
-    </div>`).join("");
-}
-
-function renderErrors({ errors }) {
-  const log = document.getElementById("error-log");
-  document.getElementById("error-count-tab").textContent = errors.length;
-
-  if (!errors.length) {
-    log.innerHTML = `<div class="empty">No errors</div>`;
-    return;
-  }
-
-  log.innerHTML = errors.map((e, i) => `
-    <div class="error-item">
-      <i class="fa fa-triangle-exclamation"></i>
-      <div class="error-msg">${e.msg}<br><span style="color:var(--muted);font-size:11px">${fmtTime(e.ts)}</span></div>
-      <button class="btn-icon btn-sm" data-dismiss-error="${i}"><i class="fa fa-xmark"></i></button>
-    </div>`).join("");
-}
-
-function renderToasts({ toasts }) {
-  document.getElementById("toast-container").innerHTML = toasts.map(t => `
-    <div class="toast">
-      <div class="toast-title"><i class="fa fa-bell"></i> ALERT</div>
-      <div class="toast-msg">${t.message}</div>
-    </div>`).join("");
-}
-
-function render(state) {
-  renderSSEState(state);
-  renderRules(state);
-  renderEvents(state);
-  renderAlerts(state);
-  renderErrors(state);
-  renderToasts(state);
-}
-
-// ─── Event delegation ────────────────────────────────────────────────────────
-
-document.addEventListener("change", (e) => {
-  const id = e.target.dataset.ruleToggle;
-  if (id) toggleRule(id);
-});
-
-document.addEventListener("click", (e) => {
-  const delId = e.target.closest("[data-rule-delete]")?.dataset.ruleDelete;
-  if (delId) { deleteRule(delId); return; }
-
-  const ackId = e.target.closest("[data-ack]")?.dataset.ack;
-  if (ackId) { acknowledgeAlert(ackId); return; }
-
-  const errIdx = e.target.closest("[data-dismiss-error]")?.dataset.dismissError;
-  if (errIdx !== undefined) { dismissError(Number(errIdx)); return; }
-});
-
-// ─── Control buttons ─────────────────────────────────────────────────────────
-
-document.getElementById("btn-connect").onclick = () => {
-  const url = document.getElementById("sse-url").value.trim();
-  connectSSE(url);
-};
-
-document.getElementById("btn-disconnect").onclick = () => disconnectSSE();
-
-document.getElementById("btn-clear-alerts").onclick = () => clearAlerts();
-
-document.getElementById("btn-add-rule").onclick = () => {
-  const result = addRule({
-    name:            document.getElementById("f-name").value,
-    source:          document.getElementById("f-source").value,
-    metric:          document.getElementById("f-metric").value,
-    operator:        document.getElementById("f-op").value,
-    threshold:       document.getElementById("f-threshold").value,
-    cooldownSeconds: document.getElementById("f-cooldown").value || "60",
-  });
-  const errEl = document.getElementById("rule-form-errors");
-  if (result.ok) {
-    errEl.textContent = "";
-    ["f-name","f-source","f-metric","f-threshold"].forEach(id => {
-      document.getElementById(id).value = "";
-    });
-    document.getElementById("f-cooldown").value = "60";
-  } else {
-    errEl.textContent = result.errors.join(" · ");
-  }
-};
-
-// Clear the stale error message as soon as the user starts correcting the form —
-// otherwise an old "X is required" message lingers even after they've typed a value.
-["f-name", "f-source", "f-metric", "f-threshold", "f-cooldown"].forEach(id => {
-  document.getElementById(id).addEventListener("input", () => {
-    document.getElementById("rule-form-errors").textContent = "";
-  });
-});
-document.getElementById("f-op").addEventListener("change", () => {
-  document.getElementById("rule-form-errors").textContent = "";
-});
-
-document.getElementById("btn-export").onclick = () => {
-  const json = exportRules();
-  const blob = new Blob([json], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "alert-rules.json";
-  a.click();
-};
-
-document.getElementById("btn-import").onclick = () => {
-  const modal = document.getElementById("modal-container");
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-bd">
-      <div class="modal">
-        <h3><i class="fa fa-upload"></i> Import rules (JSON)</h3>
-        <textarea id="import-text" placeholder='[{"name":"...","metric":"...","operator":">","threshold":5,"cooldownSeconds":60}]'></textarea>
-        <div id="import-err" class="form-err"></div>
-        <div class="modal-footer">
-          <button class="btn-ghost" id="btn-cancel-import">Cancel</button>
-          <button class="btn-primary" id="btn-do-import">Import</button>
-        </div>
-      </div>
-    </div>`;
-
-  document.getElementById("btn-cancel-import").onclick = () => { modal.innerHTML = ""; };
-  document.getElementById("modal-bd").onclick = (e) => { if (e.target === e.currentTarget) modal.innerHTML = ""; };
-  document.getElementById("btn-do-import").onclick = () => {
-    const json = document.getElementById("import-text").value.trim();
-    const result = importRules(json);
-    if (result.ok) {
-      modal.innerHTML = "";
-    } else {
-      document.getElementById("import-err").textContent =
-        result.errors.join(" · ") + (result.imported ? ` (${result.imported} imported)` : "");
-    }
-  };
-};
-
-// ─── Boot ────────────────────────────────────────────────────────────────────
-
-subscribe(render);
-render(getState());
+// ─── Renderers ──────────────────────────
